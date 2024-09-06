@@ -1,0 +1,392 @@
+//gcc -o spi_example test.c -lpigpio
+//sudo ./spi_example
+
+#include <stdio.h>
+#include <pigpio.h>
+#include <unistd.h>
+
+typedef enum
+{
+    ADS1263_GAIN_1          = 0,    /*GAIN  1 */
+    ADS1263_GAIN_2          = 1,    /*GAIN  2 */
+    ADS1263_GAIN_4          = 2,    /*GAIN  4 */
+    ADS1263_GAIN_8          = 3,    /*GAIN  8 */
+    ADS1263_GAIN_16         = 4,    /*GAIN  16 */
+    ADS1263_GAIN_32         = 5,    /*GAIN  32 */
+    ADS1263_GAIN_64         = 6,    /*GAIN  64 */
+}ADS1263_GAIN;
+typedef enum
+{
+    ADS1263_2d5SPS = 0,
+    ADS1263_5SPS,
+    ADS1263_10SPS,
+    ADS1263_16d6SPS,
+    ADS1263_20SPS,
+    ADS1263_50SPS,
+    ADS1263_60SPS,
+    ADS1263_100SPS,
+    ADS1263_400SPS,
+    ADS1263_1200SPS,
+    ADS1263_2400SPS,
+    ADS1263_4800SPS,
+    ADS1263_7200SPS,
+    ADS1263_14400SPS,
+    ADS1263_19200SPS,
+    ADS1263_38400SPS,
+}ADS1263_DRATE;
+typedef enum
+{
+    ADS1263_DELAY_0s    = 0,
+    ADS1263_DELAY_8d7us,
+    ADS1263_DELAY_17us,
+    ADS1263_DELAY_35us,
+    ADS1263_DELAY_169us,
+    ADS1263_DELAY_139us,
+    ADS1263_DELAY_278us,
+    ADS1263_DELAY_555us,
+    ADS1263_DELAY_1d1ms,
+    ADS1263_DELAY_2d2ms,
+    ADS1263_DELAY_4d4ms,
+    ADS1263_DELAY_8d8ms,
+}ADS1263_DELAY;
+typedef enum
+{
+    ADS1263_ADC2_10SPS  =   0,
+    ADS1263_ADC2_100SPS,
+    ADS1263_ADC2_400SPS,
+    ADS1263_ADC2_800SPS,
+}ADS1263_ADC2_DRATE;
+typedef enum
+{
+    ADS1263_ADC2_GAIN_1 =   0,
+    ADS1263_ADC2_GAIN_2,
+    ADS1263_ADC2_GAIN_4,
+    ADS1263_ADC2_GAIN_8,
+    ADS1263_ADC2_GAIN_16,
+    ADS1263_ADC2_GAIN_32,
+    ADS1263_ADC2_GAIN_64,
+    ADS1263_ADC2_GAIN_128,
+}ADS1263_ADC2_GAIN;
+typedef enum
+{
+    ADS1263_DAC_VLOT_4_5        = 0b01001,      //4.5V
+    ADS1263_DAC_VLOT_3_5        = 0b01000,
+    ADS1263_DAC_VLOT_3          = 0b00111,
+    ADS1263_DAC_VLOT_2_75       = 0b00110,
+    ADS1263_DAC_VLOT_2_625      = 0b00101,
+    ADS1263_DAC_VLOT_2_5625     = 0b00100,
+    ADS1263_DAC_VLOT_2_53125    = 0b00011,
+    ADS1263_DAC_VLOT_2_515625   = 0b00010,
+    ADS1263_DAC_VLOT_2_5078125  = 0b00001,
+    ADS1263_DAC_VLOT_2_5        = 0b00000,
+    ADS1263_DAC_VLOT_2_4921875  = 0b10001,
+    ADS1263_DAC_VLOT_2_484375   = 0b10010,
+    ADS1263_DAC_VLOT_2_46875    = 0b10011,
+    ADS1263_DAC_VLOT_2_4375     = 0b10100,
+    ADS1263_DAC_VLOT_2_375      = 0b10101,
+    ADS1263_DAC_VLOT_2_25       = 0b10110,
+    ADS1263_DAC_VLOT_2          = 0b10111,
+    ADS1263_DAC_VLOT_1_5        = 0b11000,
+    ADS1263_DAC_VLOT_0_5        = 0b11001,
+}ADS1263_DAC_VOLT;
+typedef enum
+{
+    /*Register address, followed by reset the default values */
+    REG_ID  = 0,    // xxh
+    REG_POWER,      // 11h
+    REG_INTERFACE,  // 05h
+    REG_MODE0,      // 00h
+    REG_MODE1,      // 80h
+    REG_MODE2,      // 04h
+    REG_INPMUX,     // 01h
+    REG_OFCAL0,     // 00h
+    REG_OFCAL1,     // 00h
+    REG_OFCAL2,     // 00h
+    REG_FSCAL0,     // 00h
+    REG_FSCAL1,     // 00h
+    REG_FSCAL2,     // 40h
+    REG_IDACMUX,    // BBh
+    REG_IDACMAG,    // 00h
+    REG_REFMUX,     // 00h
+    REG_TDACP,      // 00h
+    REG_TDACN,      // 00h
+    REG_GPIOCON,    // 00h
+    REG_GPIODIR,    // 00h
+    REG_GPIODAT,    // 00h
+    REG_ADC2CFG,    // 00h
+    REG_ADC2MUX,    // 01h
+    REG_ADC2OFC0,   // 00h
+    REG_ADC2OFC1,   // 00h
+    REG_ADC2FSC0,   // 00h
+    REG_ADC2FSC1,   // 40h
+}ADS1263_REG;
+typedef enum
+{
+    CMD_RESET   = 0x06, // Reset the ADC, 0000 011x (06h or 07h)
+    CMD_START1  = 0x08, // Start ADC1 conversions, 0000 100x (08h or 09h)
+    CMD_STOP1   = 0x0A, // Stop ADC1 conversions, 0000 101x (0Ah or 0Bh)
+    CMD_START2  = 0x0C, // Start ADC2 conversions, 0000 110x (0Ch or 0Dh)
+    CMD_STOP2   = 0x0E, // Stop ADC2 conversions, 0000 111x (0Eh or 0Fh)
+    CMD_RDATA1  = 0x12, // Read ADC1 data, 0001 001x (12h or 13h)
+    CMD_RDATA2  = 0x14, // Read ADC2 data, 0001 010x (14h or 15h)
+    CMD_SYOCAL1 = 0x16, // ADC1 system offset calibration, 0001 0110 (16h)
+    CMD_SYGCAL1 = 0x17, // ADC1 system gain calibration, 0001 0111 (17h)
+    CMD_SFOCAL1 = 0x19, // ADC1 self offset calibration, 0001 1001 (19h)
+    CMD_SYOCAL2 = 0x1B, // ADC2 system offset calibration, 0001 1011 (1Bh)
+    CMD_SYGCAL2 = 0x1C, // ADC2 system gain calibration, 0001 1100 (1Ch)
+    CMD_SFOCAL2 = 0x1E, // ADC2 self offset calibration, 0001 1110 (1Eh)
+    CMD_RREG    = 0x20, // Read registers 001r rrrr (20h+000r rrrr)
+    CMD_RREG2   = 0x00, // number of registers to read minus 1, 000n nnnn
+    CMD_WREG    = 0x40, // Write registers 010r rrrr (40h+000r rrrr)
+    CMD_WREG2   = 0x00, // number of registers to write minus 1, 000n nnnn
+}ADS1263_CMD;
+
+#define SPI_DEV 0
+#define SPI_SPEED 7500000 //8MHz max
+
+#define CS 22
+#define DRDY 17
+#define RST 18
+
+#define REF         5.08   
+
+
+void SPI_WriteByte(int Handle, uint8_t Value)
+{
+    spiWrite(Handle, &Value, 1);
+}
+
+char SPI_ReadByte(int Handle)
+{
+    char buf;
+    spiRead(Handle, &buf, 1);
+    return buf;
+}
+
+void ADS1263_reset(void)
+{
+    gpioWrite(RST, 1);
+    sleep(0.1);
+    gpioWrite(RST, 0);
+    sleep(0.1);
+    gpioWrite(RST, 1);
+    sleep(0.1);
+}
+
+void ADS1263_WriteCmd(int Handle, ADS1263_CMD Cmd)
+{
+    gpioWrite(CS, 0);
+    SPI_WriteByte(Handle, Cmd);
+    gpioWrite(CS, 1);
+}
+
+void ADS1263_WriteReg(int Handle, ADS1263_REG Reg, uint8_t data)
+{
+    uint8_t buf[3] = { CMD_WREG | Reg, 0x00, data };
+    gpioWrite(CS, 0);
+    spiWrite(Handle, buf, 3);
+    gpioWrite(CS, 1);
+}
+
+uint8_t ADS1263_Read_Register(int Handle, ADS1263_REG Reg)
+{
+    uint8_t buf[2];
+    gpioWrite(CS, 0);
+    spiWrite(Handle, (uint8_t[]){ CMD_RREG | Reg, 0x00 }, 2);
+    spiRead(Handle, buf, 1);
+    gpioWrite(CS, 1);
+    return buf[0];
+}
+
+void ADS1263_SetChannal(int Handle, uint8_t Channel)
+{
+    uint8_t INPMUX = (Channel << 4) | 0x0a;       //0x0a:VCOM as Negative Input
+    ADS1263_WriteReg(Handle, REG_INPMUX, INPMUX);
+    // char data;
+    // data = ADS1263_Read_Register(Handle, REG_INPMUX);
+    // printf("INPMUX %d \n", data);
+}
+
+uint32_t ADS1263_Read_ADC1_Data(int Handle)
+{
+    uint32_t read = 0;
+    char buf[5] = {0, 0, 0, 0, 0};
+    uint8_t Status;
+    gpioWrite(CS, 0);
+    do {
+        SPI_WriteByte(Handle, CMD_RDATA1);
+        spiRead(Handle, buf, 5);
+        Status = buf[0];
+    }while((Status & 0x40) == 0);
+    
+    // buf[0] = SPI_ReadByte(Handle);
+    // buf[1] = SPI_ReadByte(Handle);
+    // buf[2] = SPI_ReadByte(Handle);
+    // buf[3] = SPI_ReadByte(Handle);
+    gpioWrite(CS, 1);
+    read |= ((uint32_t)buf[1] << 24);
+    read |= ((uint32_t)buf[2] << 16);
+    read |= ((uint32_t)buf[3] << 8);
+    read |= (uint32_t)buf[4];
+    // printf("%x %x %x %x %x %x\r\n", Status, buf[0], buf[1], buf[2], buf[3], CRC);
+    //if(ADS1263_Checksum(read, CRC) != 0)
+    //   printf("ADC1 Data read error! \r\n");
+    return read;
+}
+
+void ADS1263_WaitDRDY(void)
+{
+    // printf("ADS1263_WaitDRDY \r\n");
+    uint32_t i = 0;
+    while(1) {
+        if(gpioRead(DRDY) == 0)
+            break;
+        if(i >= 4000000) {
+            printf("Time Out ...\r\n"); 
+            break;
+        }
+    }   
+    // printf("ADS1263_WaitDRDY Release \r\n");
+}
+
+uint32_t ADS1263_GetChannalValue(int Handle, uint8_t Channel)
+{
+    uint32_t Value = 0;
+        if(Channel>10) {
+            return 0;
+        }
+        ADS1263_SetChannal(Handle, Channel);
+        // DEV_Delay_ms(2);
+        // ADS1263_WriteCmd(CMD_START1);
+        // DEV_Delay_ms(2);
+        ADS1263_WaitDRDY();
+        Value = ADS1263_Read_ADC1_Data(Handle);
+    // printf("Get IN%d value success \r\n", Channel);
+    return Value;
+}
+
+void ADS1263_GetAll(int Handle, uint8_t *ChannelList, uint32_t *ValuesList, int nChannels)
+{
+    uint8_t i;
+    for(i = 0; i<nChannels; i++) {
+         ValuesList[i] = ADS1263_GetChannalValue(Handle, ChannelList[i]);
+        // ADS1263_WriteCmd(CMD_STOP1);
+        // DEV_Delay_ms(20);
+    }
+}
+
+int main() {
+
+    if (gpioInitialise() < 0) {
+        // pigpio initialization failed
+        printf("pigpio initialization failed\n");
+        return 1;
+    }
+	else
+	{
+		printf("pigipo running");
+	}
+    
+    gpioSetMode(CS, PI_OUTPUT);
+    gpioSetMode(DRDY, PI_INPUT);
+    gpioWrite(CS, 0);
+	
+    int spiHandle = spiOpen(SPI_DEV, SPI_SPEED, 1);  // mode 1
+    if (spiHandle < 0) {
+        // SPI open failed
+        printf("SPI open failed\n");
+        gpioTerminate();
+        return 1;
+    }
+	else
+	{
+		printf("spi Open\n");
+	};
+	
+    ADS1263_reset();
+    ADS1263_WriteCmd(spiHandle, CMD_STOP1);
+
+    char data;
+    data = ADS1263_Read_Register(spiHandle, REG_ID);
+    data = data >> 5;
+    printf("DEVID %d \n", data);
+
+    data = ADS1263_Read_Register(spiHandle, REG_MODE0);
+    printf("MODE0 %d \n", data);
+
+    uint8_t MODE1 = 0x84; // Digital Filter; 0x84:FIR, 0x64:Sinc4, 0x44:Sinc3, 0x24:Sinc2, 0x04:Sinc1
+
+    ADS1263_WriteReg(spiHandle, REG_MODE1, MODE1);
+    sleep(0.1);
+
+    data = ADS1263_Read_Register(spiHandle, REG_MODE1);
+    printf("MODE1 %d \n", data);
+
+
+// 2.5 SPS	128
+// 5 SPS	129
+// 10 SPS	130
+// 16.6 SPS	131
+// 20 SPS	132
+// 50 SPS	133
+// 60 SPS	134	
+// 100 SPS	135
+// 400 SPS	136
+// 1200 SPS	137
+// 2400 SPS	138
+// 4800 SPS	139	
+// 7200 SPS	140	
+// 14400 SPS	141	
+// 19200 SPS	142		
+// 38400 SPS	143	
+
+    uint8_t MODE2 = 143;
+    ADS1263_WriteReg(spiHandle, REG_MODE2, MODE2);
+    sleep(0.1);
+
+    data = ADS1263_Read_Register(spiHandle, REG_MODE2); 
+    printf("MODE2 %d \n", data);
+
+    data = ADS1263_Read_Register(spiHandle, REG_INPMUX); 
+    printf("INP %d \n", data);
+
+    ADS1263_WriteCmd(spiHandle, CMD_START1);
+    uint8_t nchannels = 4;
+    uint8_t channelslist[8] = {0,1,2,3,4,5,6,7};
+    uint32_t valueslist[8] = {0,0,0,0,0,0,0,0};
+
+
+    printf("TEST_ADC1_RATE\r\n");
+    int starts, startus, ends, endus;
+    double time;
+    gpioTime(0, &starts, &startus);
+    int i = 0;
+        for(i=0; i<1000; i++) {
+            ADS1263_GetAll(spiHandle, channelslist, valueslist, nchannels);
+            // ADS1263_GetChannalValue(spiHandle, 0);
+        }
+    gpioTime(0, &ends, &endus);
+    time = (ends - starts) * 1000.0 + (endus - startus) / 1000.0;
+    printf("%lf ms\r\n", time);
+    int arr_size = sizeof(valueslist)/sizeof(valueslist[0]);
+    printf("%d ", arr_size);
+    printf(" channels %lf Hz\r\n", 1000.0 / (time / 1000.0));
+    
+    
+
+
+    // uint8_t i = 0;
+    // for(i=0; i<nchannels; i++) {
+    //     if((valueslist[i]>>31) == 1)
+    //         printf("IN%d is -%lf \r\n", channelslist[i], REF*2 - valueslist[i]/2147483648.0 * REF);      //7fffffff + 1
+    //     else
+    //         printf("IN%d is %lf \r\n", channelslist[i], valueslist[i]/2147483647.0 * REF);       //7fffffff
+    // }
+
+
+
+
+	spiClose(spiHandle);
+	gpioTerminate();
+	return 0;
+}
